@@ -1,0 +1,9 @@
+data/
+.git/
+_bmad/
+_bmad-output/
+.agents/
+.claude/
+.opencode/
+.bmad-loop/
+.gitignore
