@@ -1,0 +1,29 @@
+- id: "1"
+  title: Core mirroring + archive
+  description: >-
+    The poller fetches each subscribed show's RSS feed on the default
+    ~6-hour cycle and downloads every episode not yet recorded in that
+    show's registry (CAP-1). Folders are organized by podcast name + date
+    with a per-podcast podcast.md GUID registry, and the system never
+    deletes or overwrites any file on disk (CAP-2, CAP-3).
+  spec_checkpoint: true
+  done_checkpoint: true
+- id: "2"
+  title: Config page
+  description: >-
+    A single embedded HTML page served by the binary lets the user add and
+    remove shows by RSS feed URL (CAP-4) and override the default poll
+    interval (CAP-6). Removing a show stops future downloads but leaves its
+    files on disk.
+- id: "3"
+  title: Fleet status
+  description: >-
+    The config page shows per-show last fetch time, episode count, and disk
+    usage (CAP-5). After a poll, each show's status matches its actual last
+    fetch time, episode count, and disk usage.
+- id: "4"
+  title: README
+  description: >-
+    A prominent callout near the top of the README documents the
+    feed-truncation cap and the personal-backup scope (CAP-7). It appears
+    before any instruction for adding shows.
