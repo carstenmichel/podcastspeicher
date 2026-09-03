@@ -15,4 +15,9 @@ USER nonroot:nonroot
 ENV DATA_DIR=/data
 COPY --from=build /out/podcastspeicher /usr/local/bin/podcastspeicher
 VOLUME /data
+EXPOSE 8080
+# distroless has no shell, so the healthcheck is the binary itself doing one
+# GET on the config server's /healthz endpoint.
+HEALTHCHECK --interval=1m --timeout=5s --start-period=15s --retries=3 \
+    CMD ["/usr/local/bin/podcastspeicher", "--health"]
 ENTRYPOINT ["/usr/local/bin/podcastspeicher"]

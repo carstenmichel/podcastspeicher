@@ -37,9 +37,12 @@ mkdir -p ~/podcastspeicher-data
 echo "https://example.com/feed.xml" > ~/podcastspeicher-data/shows.txt
 
 docker run -d --name podcastspeicher \
+  -p 8080:8080 \
   -v ~/podcastspeicher-data:/data \
   podcastspeicher
 ```
+
+The config page is at <http://localhost:8080> — add and remove shows and change the poll interval from the browser.
 
 Notes:
 
@@ -60,7 +63,7 @@ Or run it from source: `go run .`.
 
 ## Shows setup
 
-Shows are listed in `shows.txt` inside the data directory (`DATA_DIR/shows.txt`). The file is created empty on first start if it does not exist.
+Shows are managed on the [config page](#configuration) or, equivalently, in `shows.txt` inside the data directory (`DATA_DIR/shows.txt`). The file is created empty on first start if it does not exist.
 
 ```
 # One RSS feed URL per line. Lines starting with # are comments.
@@ -71,7 +74,7 @@ https://changelog.com/podcast/feed
 
 Behavior:
 
-- **Edits take effect on the next poll** — add or remove a URL and the change applies without restarting the app.
+- **Edits take effect on the next poll** — add or remove a URL (config page or file) and the change applies without restarting the app.
 - Removing a show stops new downloads; its files stay on disk (nothing is ever deleted).
 - Duplicate URLs are ignored.
 - A feed that fails (404, timeout, malformed XML, non-RSS) is skipped for that cycle and retried on the next poll — the other shows are not affected.
@@ -82,20 +85,32 @@ To find a show's feed URL: look for a "RSS" link on the podcast's website, or us
 
 ## Configuration
 
+The config page (served by the binary, no Node/React) is the primary interface:
+
+| What | Where |
+|---|---|
+| Add / remove shows by RSS feed URL | `GET/POST/DELETE /api/shows` (page: **Shows**) |
+| Override the poll interval | `GET/PUT /api/settings` (page: **Poll interval**) |
+| Health check | `GET /healthz` |
+
+Removing a show stops new downloads; its files stay on disk (nothing is ever deleted). The page is unauthenticated — it is meant for a trusted/local network only.
+
 Environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATA_DIR` | `./data` (`/data` in the container) | Root of the archive: `shows.txt`, show folders, registries. |
-| `POLL_INTERVAL` | `6h` | Poll cycle as a Go duration (`30m`, `2h`, `1h30m`). Minimum `1s`. |
+| `DATA_DIR` | `./data` (`/data` in the container) | Root of the archive: `shows.txt`, `settings.json`, show folders, registries. |
+| `POLL_INTERVAL` | `6h` | Poll cycle as a Go duration (`30m`, `2h`, `1h30m`). Minimum `1s`. Overridden by `settings.json` when it holds a value. |
+| `HTTP_ADDR` | `:8080` | Listen address of the config page. |
 
-The config is read once at startup, except `shows.txt`, which is re-read every poll cycle.
+The poll interval set on the config page is persisted to `settings.json` in the data directory and wins over `POLL_INTERVAL`; a change applies from the next poll cycle without a restart. `shows.txt` is re-read every poll cycle.
 
 ## Archive layout
 
 ```
 data/
 ├── shows.txt
+├── settings.json
 └── Lex Fridman/
     ├── podcast.md
     ├── 2026-08-29 - 415. The Big One.mp3
@@ -123,7 +138,7 @@ The archive is plain files and Markdown by design — grep it, sync it, open it 
 
 - **Never deletes, never overwrites.** An existing file is always kept as-is.
 - **Prefer duplicates over gaps.** When in doubt (missing file, changed feed entry), the episode is downloaded again.
-- **No hidden state.** Everything the app knows is in the archive itself: `shows.txt` + the `podcast.md` ledgers.
+- **No hidden state.** Everything the app knows is plain text in the data directory: `shows.txt`, `settings.json`, and the `podcast.md` ledgers.
 - **Fails safe.** A failed download leaves no partial file and no ledger row; the next poll retries.
 
 ## Development

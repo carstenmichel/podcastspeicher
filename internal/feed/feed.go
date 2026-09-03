@@ -125,6 +125,12 @@ func Parse(data []byte) (Show, error) {
 	return show, nil
 }
 
+// IsHTTPURL reports whether s is an absolute http(s) URL with a host — the
+// shape both feed URLs and enclosure URLs must have to be fetchable.
+func IsHTTPURL(s string) bool {
+	return isDownloadableURL(s)
+}
+
 // isDownloadableURL reports whether s is an absolute http(s) URL.
 func isDownloadableURL(s string) bool {
 	u, err := url.Parse(strings.TrimSpace(s))

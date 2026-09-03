@@ -6,59 +6,114 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
-	"unicode"
 
 	"podcastspeicher/internal/mirror"
+	"podcastspeicher/internal/settings"
+	"podcastspeicher/internal/subs"
+	"podcastspeicher/internal/web"
 )
 
-const showsFileName = "shows.txt"
+const (
+	showsFileName      = "shows.txt"
+	settingsFileName   = "settings.json"
+	defaultDataDir     = "./data"
+	defaultInterval    = 6 * time.Hour
+	defaultHTTPAddr    = ":8080"
+	defaultIntervalStr = "6h"
+)
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx); err != nil {
-		slog.Error("fatal", "error", err)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	if len(os.Args) > 1 {
+		if os.Args[1] == "--health" {
+			os.Exit(healthCheck(logger))
+		}
+		logger.Error("unknown argument", "arg", os.Args[1], "usage", "podcastspeicher [--health]")
+		os.Exit(2)
+	}
+	if err := run(ctx, logger); err != nil {
+		logger.Error("fatal", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context) error {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-
-	dataDir := envOr("DATA_DIR", "./data")
-	interval := 6 * time.Hour
-	if v := os.Getenv("POLL_INTERVAL"); v != "" {
-		d, err := parsePollInterval(v)
-		if err != nil {
-			return err
-		}
-		interval = d
+// healthCheck performs one GET on the config server's /healthz endpoint and
+// returns a process exit code: 0 when the server answers, 1 otherwise. It
+// exists so the shell-less distroless image can run a Docker HEALTHCHECK.
+func healthCheck(logger *slog.Logger) int {
+	addr := envOr("HTTP_ADDR", defaultHTTPAddr)
+	host := addr
+	if strings.HasPrefix(host, ":") {
+		host = "127.0.0.1" + host
 	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://" + host + "/healthz")
+	if err != nil {
+		logger.Warn("health check failed", "error", err)
+		return 1
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		logger.Warn("health check failed", "status", resp.StatusCode)
+		return 1
+	}
+	return 0
+}
 
+func run(ctx context.Context, logger *slog.Logger) error {
+	dataDir := envOr("DATA_DIR", defaultDataDir)
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
 	}
-	showsFile := filepath.Join(dataDir, showsFileName)
+	subStore := &subs.Store{Path: filepath.Join(dataDir, showsFileName), Log: logger}
+	setStore := &settings.Store{Path: filepath.Join(dataDir, settingsFileName), Log: logger}
+	envInterval := os.Getenv("POLL_INTERVAL")
+
+	interval, err := effectiveInterval(setStore, envInterval, logger)
+	if err != nil {
+		return err
+	}
 
 	m := mirror.New(dataDir, logger)
 
-	shows, err := loadShows(showsFile, logger)
+	shows, err := subStore.List()
 	if err != nil {
 		return err
 	}
 	if len(shows) == 0 {
-		logger.Warn("no shows configured", "hint", "add one RSS feed URL per line to "+showsFile)
+		logger.Warn("no shows configured", "hint", "add a show on the config page or one RSS feed URL per line to "+subStore.Path)
 	}
 
-	// Initial poll at startup, then one per interval.
-	pollOnce(ctx, m, showsFile, logger)
+	srv := &http.Server{
+		Addr:    envOr("HTTP_ADDR", defaultHTTPAddr),
+		Handler: web.NewServer(subStore, setStore, envIntervalString(envInterval), logger).Handler(),
+	}
+	srvDone := make(chan error, 1)
+	go func() {
+		logger.Info("config page listening", "addr", srv.Addr)
+		err := srv.ListenAndServe()
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		}
+		srvDone <- err
+	}()
+
+	// Initial poll at startup, then one per interval. The interval is
+	// re-resolved after every poll so a config-page change applies from the
+	// next cycle without a restart.
+	pollOnce(ctx, m, subStore, logger)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	logger.Info("poller running", "data_dir", dataDir, "interval", interval.String())
@@ -66,17 +121,33 @@ func run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			logger.Info("shutting down")
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			srv.Shutdown(shutdownCtx)
+			cancel()
+			if err := <-srvDone; err != nil {
+				return err
+			}
 			return nil
+		case err := <-srvDone:
+			// A bind failure (e.g. port in use) is fatal: the config page
+			// is a required capability, so failing loudly beats continuing
+			// without it.
+			return err
 		case <-ticker.C:
-			pollOnce(ctx, m, showsFile, logger)
+			pollOnce(ctx, m, subStore, logger)
+			if cur, cerr := effectiveInterval(setStore, envInterval, logger); cerr == nil && cur != interval {
+				interval = cur
+				ticker.Reset(interval)
+				logger.Info("poll interval changed", "interval", interval.String())
+			}
 		}
 	}
 }
 
-func pollOnce(ctx context.Context, m *mirror.Mirror, showsFile string, logger *slog.Logger) {
-	// Re-read shows.txt each cycle so edits (or story 2's config page)
+func pollOnce(ctx context.Context, m *mirror.Mirror, subStore *subs.Store, logger *slog.Logger) {
+	// Re-read shows.txt each cycle so edits (or config-page changes)
 	// take effect on the next poll without a restart.
-	shows, err := loadShows(showsFile, logger)
+	shows, err := subStore.List()
 	if err != nil {
 		logger.Error("load shows failed", "error", err)
 		return
@@ -94,67 +165,33 @@ func pollOnce(ctx context.Context, m *mirror.Mirror, showsFile string, logger *s
 	}
 }
 
-// parsePollInterval parses the POLL_INTERVAL value. Surrounding whitespace is
-// tolerated; the duration must be at least one second so a misconfiguration
-// cannot hot-loop the poller.
-func parsePollInterval(v string) (time.Duration, error) {
-	v = strings.TrimSpace(v)
-	d, err := time.ParseDuration(v)
-	if err != nil {
-		return 0, fmt.Errorf("invalid POLL_INTERVAL %q: %w", v, err)
+// effectiveInterval resolves the poll interval: a valid override in
+// settings.json wins over the POLL_INTERVAL env, which wins over the
+// default. An invalid settings.json value falls back with a warning (the
+// config page validates what it writes); an invalid env value is fatal.
+func effectiveInterval(setStore *settings.Store, envInterval string, logger *slog.Logger) (time.Duration, error) {
+	if v, err := setStore.Get(); err == nil && v != "" {
+		if d, perr := settings.ParseInterval(v); perr == nil {
+			return d, nil
+		} else {
+			logger.Warn("settings poll_interval invalid; using fallback", "value", v, "error", perr)
+		}
+	} else if err != nil {
+		logger.Warn("settings unreadable; using fallback", "error", err)
 	}
-	if d < time.Second {
-		return 0, fmt.Errorf("POLL_INTERVAL must be at least 1s, got %q", v)
+	if envInterval != "" {
+		return settings.ParseInterval(envInterval)
 	}
-	return d, nil
+	return defaultInterval, nil
 }
 
-// loadShows reads feed URLs from path, one per line, with "#" comments.
-// A missing file is created empty so there is something to edit.
-func loadShows(path string, logger *slog.Logger) ([]string, error) {
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		f, cerr := os.Create(path)
-		if cerr != nil {
-			return nil, fmt.Errorf("create %s: %w", path, cerr)
-		}
-		if cerr := f.Close(); cerr != nil {
-			return nil, fmt.Errorf("close %s: %w", path, cerr)
-		}
-		logger.Warn("shows.txt missing; created empty file", "path", path)
-		return nil, nil
+// envIntervalString reports the interval string to show on the config page
+// when settings.json holds no override: the POLL_INTERVAL env value or "6h".
+func envIntervalString(envInterval string) string {
+	if v := strings.TrimSpace(envInterval); v != "" {
+		return v
 	}
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	text := strings.TrimPrefix(string(data), "\uFEFF")
-	seen := make(map[string]bool)
-	var shows []string
-	for _, line := range strings.Split(text, "\n") {
-		line = stripComment(line)
-		line = strings.TrimSpace(line)
-		if line == "" || seen[line] {
-			continue
-		}
-		seen[line] = true
-		shows = append(shows, line)
-	}
-	return shows, nil
-}
-
-// stripComment removes a trailing comment: everything from a '#' that is at
-// the start of the line or preceded by whitespace. A '#' inside a URL (e.g.
-// a fragment) is preserved.
-func stripComment(line string) string {
-	for i := 0; i < len(line); i++ {
-		if line[i] != '#' {
-			continue
-		}
-		if i == 0 || unicode.IsSpace(rune(line[i-1])) {
-			return line[:i]
-		}
-	}
-	return line
+	return defaultIntervalStr
 }
 
 func envOr(key, def string) string {

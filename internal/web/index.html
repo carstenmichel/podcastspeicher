@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>podcastspeicher</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 2rem auto; max-width: 42rem; padding: 0 1rem; line-height: 1.5; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.05rem; margin-bottom: .4rem; }
+  section { margin-bottom: 1.6rem; }
+  ul { list-style: none; padding: 0; }
+  li.show { display: flex; align-items: center; gap: .5rem; border: 1px solid #8884; border-radius: .4rem; padding: .35rem .6rem; margin-bottom: .4rem; }
+  li.show .url { flex: 1; overflow-wrap: anywhere; font-family: ui-monospace, monospace; font-size: .9rem; }
+  button { cursor: pointer; border: 1px solid #8886; border-radius: .35rem; background: transparent; padding: .25rem .7rem; font: inherit; }
+  button:hover { background: #8882; }
+  form { display: flex; gap: .5rem; }
+  input { flex: 1; font: inherit; padding: .3rem .5rem; border: 1px solid #8886; border-radius: .35rem; background: transparent; }
+  #status { min-height: 1.4em; font-size: .9rem; }
+  #status.err { color: #c33; }
+  #status.ok { color: #2a2; }
+  .hint { font-size: .85rem; opacity: .7; }
+</style>
+</head>
+<body>
+<h1>podcastspeicher</h1>
+<p class="hint">Mirrors your podcast feeds to disk. Removing a show stops downloads; its files stay on disk.</p>
+
+<section>
+  <h2>Shows</h2>
+  <ul id="shows"></ul>
+  <form id="add-form">
+    <input id="add-url" type="url" placeholder="https://example.com/feed.xml" required>
+    <button type="submit">Add</button>
+  </form>
+</section>
+
+<section>
+  <h2>Poll interval</h2>
+  <form id="interval-form">
+    <input id="interval-input" type="text" placeholder="6h" spellcheck="false" required>
+    <button type="submit">Save</button>
+  </form>
+  <p class="hint">Go duration: 30m, 2h, 1h30m. Minimum 1s. Takes effect from the next poll cycle.</p>
+</section>
+
+<p id="status" role="status"></p>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+
+function flash(msg, isErr) {
+  statusEl.textContent = msg;
+  statusEl.className = isErr ? "err" : "ok";
+}
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  let body = null;
+  try { body = await res.json(); } catch (_) { /* non-JSON response */ }
+  if (!res.ok) {
+    const msg = body && body.error ? body.error : "HTTP " + res.status;
+    throw new Error(msg);
+  }
+  return body;
+}
+
+function renderShows(shows) {
+  const ul = $("shows");
+  ul.textContent = "";
+  if (shows.length === 0) {
+    const li = document.createElement("li");
+    li.className = "hint";
+    li.textContent = "No shows yet — add your first feed below.";
+    ul.appendChild(li);
+    return;
+  }
+  for (const url of shows) {
+    const li = document.createElement("li");
+    li.className = "show";
+    const span = document.createElement("span");
+    span.className = "url";
+    span.textContent = url;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Remove";
+    btn.addEventListener("click", () => removeShow(url));
+    li.appendChild(span);
+    li.appendChild(btn);
+    ul.appendChild(li);
+  }
+}
+
+async function load() {
+  const shows = await api("/api/shows");
+  const settings = await api("/api/settings");
+  renderShows(shows.shows);
+  $("interval-input").value = settings.poll_interval;
+}
+
+async function addShow(url) {
+  await api("/api/shows", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: url }),
+  });
+  flash("Added " + url + " — mirroring starts on the next poll.", false);
+  await load();
+}
+
+async function removeShow(url) {
+  await api("/api/shows?url=" + encodeURIComponent(url), { method: "DELETE" });
+  flash("Removed " + url + " — files stay on disk.", false);
+  await load();
+}
+
+async function saveInterval(value) {
+  await api("/api/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ poll_interval: value }),
+  });
+  flash("Poll interval set to " + value + ".", false);
+  await load();
+}
+
+$("add-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const url = $("add-url").value.trim();
+  if (!url) return;
+  try {
+    await addShow(url);
+    $("add-url").value = "";
+  } catch (err) { flash(err.message, true); }
+});
+
+$("interval-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const value = $("interval-input").value.trim();
+  if (!value) return;
+  try {
+    await saveInterval(value);
+  } catch (err) { flash(err.message, true); }
+});
+
+load().catch((err) => flash("Failed to load: " + err.message, true));
+</script>
+</body>
+</html>
