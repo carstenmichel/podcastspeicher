@@ -18,6 +18,7 @@ import (
 
 	"podcastspeicher/internal/mirror"
 	"podcastspeicher/internal/settings"
+	"podcastspeicher/internal/status"
 	"podcastspeicher/internal/subs"
 	"podcastspeicher/internal/web"
 )
@@ -87,6 +88,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	}
 
 	m := mirror.New(dataDir, logger)
+	statStore := status.NewStore()
 
 	shows, err := subStore.List()
 	if err != nil {
@@ -98,7 +100,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 
 	srv := &http.Server{
 		Addr:    envOr("HTTP_ADDR", defaultHTTPAddr),
-		Handler: web.NewServer(subStore, setStore, envIntervalString(envInterval), logger).Handler(),
+		Handler: web.NewServer(subStore, setStore, statStore, envIntervalString(envInterval), logger).Handler(),
 	}
 	srvDone := make(chan error, 1)
 	go func() {
@@ -113,7 +115,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	// Initial poll at startup, then one per interval. The interval is
 	// re-resolved after every poll so a config-page change applies from the
 	// next cycle without a restart.
-	pollOnce(ctx, m, subStore, logger)
+	pollOnce(ctx, m, subStore, statStore, logger)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	logger.Info("poller running", "data_dir", dataDir, "interval", interval.String())
@@ -134,7 +136,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 			// without it.
 			return err
 		case <-ticker.C:
-			pollOnce(ctx, m, subStore, logger)
+			pollOnce(ctx, m, subStore, statStore, logger)
 			if cur, cerr := effectiveInterval(setStore, envInterval, logger); cerr == nil && cur != interval {
 				interval = cur
 				ticker.Reset(interval)
@@ -144,7 +146,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	}
 }
 
-func pollOnce(ctx context.Context, m *mirror.Mirror, subStore *subs.Store, logger *slog.Logger) {
+func pollOnce(ctx context.Context, m *mirror.Mirror, subStore *subs.Store, statStore *status.Store, logger *slog.Logger) {
 	// Re-read shows.txt each cycle so edits (or config-page changes)
 	// take effect on the next poll without a restart.
 	shows, err := subStore.List()
@@ -157,10 +159,12 @@ func pollOnce(ctx context.Context, m *mirror.Mirror, subStore *subs.Store, logge
 			return
 		}
 		start := time.Now()
-		if err := m.PollShow(ctx, feedURL); err != nil {
+		result, err := m.PollShow(ctx, feedURL)
+		if err != nil {
 			logger.Error("show skipped this cycle", "feed", feedURL, "error", err)
 			continue
 		}
+		statStore.Record(feedURL, result.ShowDir, result.EpisodeCount, time.Now())
 		logger.Info("show polled", "feed", feedURL, "took", time.Since(start).Round(time.Millisecond))
 	}
 }

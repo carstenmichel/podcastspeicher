@@ -62,41 +62,52 @@ func New(dataDir string, log *slog.Logger) *Mirror {
 	}
 }
 
+// PollResult is returned by PollShow on a successful poll.
+type PollResult struct {
+	// ShowDir is the archive directory for the show.
+	ShowDir string
+	// EpisodeCount is the number of registry rows after the poll.
+	EpisodeCount int
+}
+
 // PollShow fetches one show's feed and downloads every episode that is not
 // already mirrored. Episodes are processed sequentially; a cancelled context
 // aborts the poll promptly. A fetch or parse error is returned so the caller
 // can skip the show until the next cycle.
-func (m *Mirror) PollShow(ctx context.Context, feedURL string) error {
+func (m *Mirror) PollShow(ctx context.Context, feedURL string) (PollResult, error) {
 	show, err := feed.Fetch(ctx, m.FeedClient, feedURL)
 	if err != nil {
-		return err
+		return PollResult{}, err
 	}
 	dir, err := m.resolveShowDir(feedURL, show.Title)
 	if err != nil {
-		return err
+		return PollResult{}, err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("mirror: mkdir %s: %w", dir, err)
+		return PollResult{}, fmt.Errorf("mirror: mkdir %s: %w", dir, err)
 	}
 	m.removeStaleTempFiles(dir)
 	reg, err := registry.Load(filepath.Join(dir, registryName))
 	if err != nil {
-		return err
+		return PollResult{}, err
 	}
 	headerTitle := strings.TrimSpace(show.Title)
 	if headerTitle == "" {
 		headerTitle = filepath.Base(dir)
 	}
 	if err := reg.EnsureHeader(headerTitle, feedURL); err != nil {
-		return err
+		return PollResult{}, err
 	}
 	for _, ep := range show.Episodes {
 		if err := ctx.Err(); err != nil {
-			return err
+			return PollResult{}, err
 		}
 		m.mirrorEpisode(ctx, dir, reg, ep)
 	}
-	return nil
+	return PollResult{
+		ShowDir:      dir,
+		EpisodeCount: len(reg.Entries()),
+	}, nil
 }
 
 // resolveShowDir determines the archive directory for a feed. Existing show

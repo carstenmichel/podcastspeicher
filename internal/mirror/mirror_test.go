@@ -132,7 +132,8 @@ func (e *env) feedURL(path string) string { return e.Server.URL + path }
 
 func (e *env) pollPath(t *testing.T, path string) error {
 	t.Helper()
-	return e.m.PollShow(context.Background(), e.feedURL(path))
+	_, err := e.m.PollShow(context.Background(), e.feedURL(path))
+	return err
 }
 
 func (e *env) poll(t *testing.T) error { return e.pollPath(t, "/feed.xml") }
@@ -891,7 +892,8 @@ func TestPreRenameGuardKeepsConcurrentFile(t *testing.T) {
 	))
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- e.m.PollShow(context.Background(), e.feedURL("/feed.xml"))
+		_, err := e.m.PollShow(context.Background(), e.feedURL("/feed.xml"))
+		errCh <- err
 	}()
 	// Wait until the download is in flight (its temp file exists).
 	showDir := e.waitTempInFlight(t)
@@ -936,7 +938,8 @@ func TestContextCancelMidDownload(t *testing.T) {
 	defer cancel()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- e.m.PollShow(ctx, e.feedURL("/feed.xml"))
+		_, err := e.m.PollShow(ctx, e.feedURL("/feed.xml"))
+		errCh <- err
 	}()
 	showDir := e.waitTempInFlight(t)
 	cancel()

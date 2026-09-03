@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"podcastspeicher/internal/settings"
+	"podcastspeicher/internal/status"
 	"podcastspeicher/internal/subs"
 )
 
@@ -25,6 +27,7 @@ func newTestServer(t *testing.T) *Server {
 	return NewServer(
 		&subs.Store{Path: filepath.Join(dir, "shows.txt"), Log: discardLogger()},
 		&settings.Store{Path: filepath.Join(dir, "settings.json"), Log: discardLogger()},
+		status.NewStore(),
 		"6h",
 		discardLogger(),
 	)
@@ -192,5 +195,43 @@ func TestSettingsAPI(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"poll_interval": "1h30m"`) {
 		t.Errorf("settings.json = %s, want the stored override", data)
+	}
+}
+
+func TestStatusAPI(t *testing.T) {
+	s := newTestServer(t)
+
+	// Empty store: endpoint returns an empty array, not null.
+	rec := do(t, s, http.MethodGet, "/api/status", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/status = %d, want 200", rec.Code)
+	}
+	m := decodeBody(t, rec)
+	shows, _ := m["shows"].([]any)
+	if len(shows) != 0 {
+		t.Errorf("shows before any poll = %v, want []", shows)
+	}
+
+	// Record one show and verify it appears.
+	s.Status.Record("https://a.example/feed", "/data/A Example", 3, time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC))
+
+	rec = do(t, s, http.MethodGet, "/api/status", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/status after record = %d, want 200", rec.Code)
+	}
+	m = decodeBody(t, rec)
+	shows, _ = m["shows"].([]any)
+	if len(shows) != 1 {
+		t.Fatalf("shows after record = %v, want 1 entry", shows)
+	}
+	entry, _ := shows[0].(map[string]any)
+	if entry["feed"] != "https://a.example/feed" {
+		t.Errorf("feed = %v, want https://a.example/feed", entry["feed"])
+	}
+	if entry["episode_count"] != float64(3) {
+		t.Errorf("episode_count = %v, want 3", entry["episode_count"])
+	}
+	if entry["last_fetched"] == nil || entry["last_fetched"] == "" {
+		t.Errorf("last_fetched is missing or empty: %v", entry["last_fetched"])
 	}
 }

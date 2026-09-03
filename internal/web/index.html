@@ -21,6 +21,11 @@
   #status.err { color: #c33; }
   #status.ok { color: #2a2; }
   .hint { font-size: .85rem; opacity: .7; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: .3rem .5rem; border-bottom: 1px solid #8882; }
+  th { font-weight: 600; }
+  td.mono { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+  #fleet-hint { font-size: .85rem; opacity: .7; }
 </style>
 </head>
 <body>
@@ -34,6 +39,15 @@
     <input id="add-url" type="url" placeholder="https://example.com/feed.xml" required>
     <button type="submit">Add</button>
   </form>
+</section>
+
+<section>
+  <h2>Fleet status</h2>
+  <p id="fleet-hint" class="hint">Refreshed after each poll. Last fetched time resets on container restart.</p>
+  <table id="fleet-table">
+    <thead><tr><th>Feed</th><th>Last fetched</th><th>Episodes</th><th>Disk</th></tr></thead>
+    <tbody id="fleet-body"></tbody>
+  </table>
 </section>
 
 <section>
@@ -94,11 +108,60 @@ function renderShows(shows) {
   }
 }
 
+function fmtBytes(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + " MB";
+  return (n / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+}
+
+function fmtDate(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString();
+  } catch (_) { return iso; }
+}
+
+function renderFleet(shows) {
+  const tbody = $("fleet-body");
+  tbody.textContent = "";
+  if (!shows || shows.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.className = "hint";
+    td.textContent = "No polls completed yet.";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const s of shows) {
+    const tr = document.createElement("tr");
+    const cells = [
+      { text: s.feed, mono: true },
+      { text: fmtDate(s.last_fetched) },
+      { text: String(s.episode_count) },
+      { text: fmtBytes(s.disk_bytes) },
+    ];
+    for (const c of cells) {
+      const td = document.createElement("td");
+      if (c.mono) td.className = "mono";
+      td.textContent = c.text;
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
 async function load() {
-  const shows = await api("/api/shows");
-  const settings = await api("/api/settings");
+  const [shows, settings, stat] = await Promise.all([
+    api("/api/shows"),
+    api("/api/settings"),
+    api("/api/status"),
+  ]);
   renderShows(shows.shows);
   $("interval-input").value = settings.poll_interval;
+  renderFleet(stat.shows);
 }
 
 async function addShow(url) {

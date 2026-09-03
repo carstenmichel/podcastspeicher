@@ -17,6 +17,7 @@ import (
 
 	"podcastspeicher/internal/mirror"
 	"podcastspeicher/internal/settings"
+	"podcastspeicher/internal/status"
 	"podcastspeicher/internal/subs"
 )
 
@@ -102,7 +103,7 @@ func TestPollOnceFailureIsolationAndShowPickup(t *testing.T) {
 
 	// A 404ing show must not prevent the healthy show from being mirrored.
 	writeShows(srv.URL+"/bad/feed.xml", srv.URL+"/good/feed.xml")
-	pollOnce(context.Background(), m, subStore, discardLogger())
+	pollOnce(context.Background(), m, subStore, status.NewStore(), discardLogger())
 	if _, err := os.Stat(filepath.Join(dir, "Good Show", "2026-08-29 - Good Show Ep.mp3")); err != nil {
 		t.Fatalf("healthy show was not mirrored: %v", err)
 	}
@@ -119,7 +120,7 @@ func TestPollOnceFailureIsolationAndShowPickup(t *testing.T) {
 	// Editing shows.txt between pollOnce calls picks up the new show without
 	// a restart.
 	writeShows(srv.URL + "/other/feed.xml")
-	pollOnce(context.Background(), m, subStore, discardLogger())
+	pollOnce(context.Background(), m, subStore, status.NewStore(), discardLogger())
 	if _, err := os.Stat(filepath.Join(dir, "Other Show", "2026-08-29 - Other Show Ep.mp3")); err != nil {
 		t.Fatalf("newly added show was not picked up without a restart: %v", err)
 	}

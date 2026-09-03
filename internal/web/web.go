@@ -15,6 +15,7 @@ import (
 
 	"podcastspeicher/internal/feed"
 	"podcastspeicher/internal/settings"
+	"podcastspeicher/internal/status"
 	"podcastspeicher/internal/subs"
 )
 
@@ -28,6 +29,7 @@ const maxBodyBytes = 4 << 10
 type Server struct {
 	Subs     *subs.Store
 	Settings *settings.Store
+	Status   *status.Store
 	// DefaultInterval is the effective interval string when settings.json
 	// holds no valid override: the POLL_INTERVAL env value or "6h".
 	DefaultInterval string
@@ -44,15 +46,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/shows", s.handleRemoveShow)
 	mux.HandleFunc("GET /api/settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", s.handleSetSettings)
+	mux.HandleFunc("GET /api/status", s.handleGetStatus)
 	return mux
 }
 
 // NewServer returns a Server with the given stores. defaultInterval is the
 // interval string to report when settings.json holds no valid override.
-func NewServer(subsStore *subs.Store, setStore *settings.Store, defaultInterval string, log *slog.Logger) *Server {
+func NewServer(subsStore *subs.Store, setStore *settings.Store, statStore *status.Store, defaultInterval string, log *slog.Logger) *Server {
 	return &Server{
 		Subs:            subsStore,
 		Settings:        setStore,
+		Status:          statStore,
 		DefaultInterval: defaultInterval,
 		Log:             log,
 	}
@@ -126,6 +130,14 @@ func (s *Server) handleRemoveShow(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Log.Info("show removed via config page", "feed", u)
 	writeJSON(w, http.StatusOK, map[string]any{"removed": u})
+}
+
+func (s *Server) handleGetStatus(w http.ResponseWriter, _ *http.Request) {
+	statuses := s.Status.All()
+	if statuses == nil {
+		statuses = []status.ShowStatus{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"shows": statuses})
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, _ *http.Request) {
