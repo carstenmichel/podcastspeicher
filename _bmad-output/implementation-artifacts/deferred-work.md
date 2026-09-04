@@ -36,3 +36,10 @@
   summary: Exotic collision: two episodes with NO stable id (no itunes:episodeGuid, no guid, no link) and identical sanitized date+title still collapse to one file.
   status: needs-human-decision
   evidence: "2026-09-04 sweep: registry format unchanged (| Date | Title | GUID | File |, internal/registry/registry.go:14-19); no enclosure-URL key. Resolving requires storing an enclosure-URL key in the frozen podcast.md registry format (Ask First: human-gated) or an explicit documented acceptance."
+  Resolving requires storing an enclosure-URL key in the frozen podcast.md registry format (Ask First: human-gated) or an explicit documented acceptance; needs a human decision.
+- source_spec: `_bmad-output/specs/spec-podcast-backup/stories/5-atom-feed-support.md`
+  summary: An Atom feed whose root <feed> element uses a non-Atom namespace (e.g. RSS 1.0 RDF, which also uses <feed>) is dispatched to parseAtom and silently mis-parsed.
+  evidence: The dispatch switch keys on local element name only; RSS 1.0 also has a <feed> root in the RDF namespace; a namespace guard on the dispatch would prevent mis-parsing — deferred because RSS 1.0 is rare and out of spec scope.
+- source_spec: `_bmad-output/specs/spec-podcast-backup/stories/5-atom-feed-support.md`
+  summary: Atom episodes use <updated> (last-modified) as PubDate; <published> (original publish date) is not surfaced even when present.
+  evidence: Spec mandates <updated>; using <published> when present would give more accurate episode sort order; requires spec renegotiation.

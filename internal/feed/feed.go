@@ -1,4 +1,4 @@
-// Package feed fetches and parses RSS 2.0 podcast feeds.
+// Package feed fetches and parses RSS 2.0 and Atom 1.0 podcast feeds.
 package feed
 
 import (
@@ -78,11 +78,12 @@ func Parse(data []byte) (Show, error) {
 	}
 	switch root.Name.Local {
 	case "rss":
-		// RSS 2.0, the only format supported in v1
+		// RSS 2.0
 	case "feed":
-		return Show{}, fmt.Errorf("feed: Atom document; only RSS 2.0 is supported")
+		// Atom 1.0
+		return parseAtom(dec, root)
 	default:
-		return Show{}, fmt.Errorf("feed: unsupported root <%s>; only RSS 2.0 is supported", root.Name.Local)
+		return Show{}, fmt.Errorf("feed: unsupported root <%s>; only RSS 2.0 and Atom 1.0 are supported", root.Name.Local)
 	}
 	var doc rssDoc
 	if err := dec.DecodeElement(&doc, root); err != nil {
@@ -156,6 +157,55 @@ func nextStartElement(dec *xml.Decoder) (*xml.StartElement, error) {
 		}
 		// skip prolog, comments, DOCTYPE, stray whitespace
 	}
+}
+
+// parseAtom parses an Atom 1.0 feed document. dec must be positioned just
+// after the opening <feed> start element (passed as root).
+func parseAtom(dec *xml.Decoder, root *xml.StartElement) (Show, error) {
+	var doc atomFeed
+	if err := dec.DecodeElement(&doc, root); err != nil {
+		return Show{}, fmt.Errorf("feed: parse atom: %w", err)
+	}
+	show := Show{Title: strings.TrimSpace(doc.Title)}
+	for _, entry := range doc.Entries {
+		ep := Episode{
+			GUID:    strings.TrimSpace(entry.ID),
+			Title:   strings.TrimSpace(entry.Title),
+			PubDate: strings.TrimSpace(entry.Updated),
+		}
+		// Select the first <link rel="enclosure"> with a valid absolute
+		// http(s) href; entries with no downloadable enclosure are skipped.
+		for _, lnk := range entry.Links {
+			if lnk.Rel == "enclosure" && isDownloadableURL(lnk.Href) {
+				ep.EnclosureURL = lnk.Href
+				ep.EnclosureType = lnk.Type
+				break
+			}
+		}
+		if ep.EnclosureURL == "" {
+			continue // nothing to mirror
+		}
+		show.Episodes = append(show.Episodes, ep)
+	}
+	return show, nil
+}
+
+type atomLink struct {
+	Rel  string `xml:"rel,attr"`
+	Href string `xml:"href,attr"`
+	Type string `xml:"type,attr"`
+}
+
+type atomEntry struct {
+	ID      string     `xml:"id"`
+	Title   string     `xml:"title"`
+	Updated string     `xml:"updated"`
+	Links   []atomLink `xml:"link"`
+}
+
+type atomFeed struct {
+	Title   string      `xml:"title"`
+	Entries []atomEntry `xml:"entry"`
 }
 
 type rssDoc struct {

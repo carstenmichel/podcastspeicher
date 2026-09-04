@@ -131,9 +131,8 @@ func TestParseFirstEnclosureWins(t *testing.T) {
 	}
 }
 
-func TestParseRejectsNonRSS(t *testing.T) {
+func TestParseRejectsUnknownRoot(t *testing.T) {
 	cases := map[string]string{
-		"atom": `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>A</title></feed>`,
 		"html": `<html><body>hi</body></html>`,
 		"junk": `this is not xml`,
 	}
@@ -259,6 +258,214 @@ func TestParseSelectsFirstDownloadableEnclosure(t *testing.T) {
 	}
 	if ep.EnclosureType != "audio/mp4" {
 		t.Errorf("EnclosureType = %q, want audio/mp4", ep.EnclosureType)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Atom 1.0 tests
+// ---------------------------------------------------------------------------
+
+const sampleAtomFeed = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Atom Show</title>
+  <entry>
+    <id>atom-guid-1</id>
+    <title>Atom Ep 1</title>
+    <updated>2026-09-01T10:00:00Z</updated>
+    <link rel="enclosure" href="https://example.com/atom-ep1.mp3" type="audio/mpeg"/>
+  </entry>
+  <entry>
+    <id>atom-guid-2</id>
+    <title>Atom Ep 2</title>
+    <updated>2026-09-02T11:00:00Z</updated>
+    <link rel="alternate" href="https://example.com/atom-ep2"/>
+    <link rel="enclosure" href="https://example.com/atom-ep2.m4a" type="audio/mp4"/>
+  </entry>
+</feed>`
+
+func TestParseAtom(t *testing.T) {
+	show, err := Parse([]byte(sampleAtomFeed))
+	if err != nil {
+		t.Fatalf("Parse(atom): %v", err)
+	}
+	if show.Title != "Atom Show" {
+		t.Errorf("Title = %q, want %q", show.Title, "Atom Show")
+	}
+	if len(show.Episodes) != 2 {
+		t.Fatalf("Episodes = %d, want 2", len(show.Episodes))
+	}
+	want := []Episode{
+		{
+			GUID:          "atom-guid-1",
+			Title:         "Atom Ep 1",
+			EnclosureURL:  "https://example.com/atom-ep1.mp3",
+			EnclosureType: "audio/mpeg",
+			PubDate:       "2026-09-01T10:00:00Z",
+		},
+		{
+			GUID:          "atom-guid-2",
+			Title:         "Atom Ep 2",
+			EnclosureURL:  "https://example.com/atom-ep2.m4a",
+			EnclosureType: "audio/mp4",
+			PubDate:       "2026-09-02T11:00:00Z",
+		},
+	}
+	for i, w := range want {
+		got := show.Episodes[i]
+		if got != w {
+			t.Errorf("episode %d = %+v, want %+v", i, got, w)
+		}
+	}
+}
+
+func TestParseAtomNoEnclosure(t *testing.T) {
+	doc := `<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>No Enc</title>
+  <entry>
+    <id>no-enc-1</id>
+    <title>Entry without enclosure</title>
+    <updated>2026-09-01T00:00:00Z</updated>
+    <link rel="alternate" href="https://example.com/ep1"/>
+  </entry>
+</feed>`
+	show, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(show.Episodes) != 0 {
+		t.Errorf("Episodes = %d, want 0 (entry without enclosure skipped)", len(show.Episodes))
+	}
+}
+
+func TestParseAtomNoID(t *testing.T) {
+	doc := `<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>No ID Show</title>
+  <entry>
+    <title>Entry without id</title>
+    <updated>2026-09-01T00:00:00Z</updated>
+    <link rel="enclosure" href="https://example.com/ep.mp3" type="audio/mpeg"/>
+  </entry>
+</feed>`
+	show, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(show.Episodes) != 1 {
+		t.Fatalf("Episodes = %d, want 1", len(show.Episodes))
+	}
+	if show.Episodes[0].GUID != "" {
+		t.Errorf("GUID = %q, want empty string for entry with no <id>", show.Episodes[0].GUID)
+	}
+}
+
+func TestParseAtomBadEnclosure(t *testing.T) {
+	doc := `<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Bad Enc Show</title>
+  <entry>
+    <id>bad-enc-1</id>
+    <title>Relative enclosure</title>
+    <updated>2026-09-01T00:00:00Z</updated>
+    <link rel="enclosure" href="ep.mp3" type="audio/mpeg"/>
+  </entry>
+</feed>`
+	show, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(show.Episodes) != 0 {
+		t.Errorf("Episodes = %d, want 0 (relative enclosure URL skipped)", len(show.Episodes))
+	}
+}
+
+func TestParseAtomFirstEnclosureWins(t *testing.T) {
+	doc := `<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Multi Enc Show</title>
+  <entry>
+    <id>multi-enc-1</id>
+    <title>Two enclosures</title>
+    <updated>2026-09-01T00:00:00Z</updated>
+    <link rel="enclosure" href="https://example.com/first.mp3" type="audio/mpeg"/>
+    <link rel="enclosure" href="https://example.com/second.m4a" type="audio/mp4"/>
+  </entry>
+</feed>`
+	show, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(show.Episodes) != 1 {
+		t.Fatalf("Episodes = %d, want 1", len(show.Episodes))
+	}
+	ep := show.Episodes[0]
+	if ep.EnclosureURL != "https://example.com/first.mp3" {
+		t.Errorf("EnclosureURL = %q, want first enclosure", ep.EnclosureURL)
+	}
+	if ep.EnclosureType != "audio/mpeg" {
+		t.Errorf("EnclosureType = %q, want audio/mpeg", ep.EnclosureType)
+	}
+}
+
+func TestParseAtomEmpty(t *testing.T) {
+	doc := `<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Empty Show</title>
+</feed>`
+	show, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if show.Title != "Empty Show" {
+		t.Errorf("Title = %q, want %q", show.Title, "Empty Show")
+	}
+	if len(show.Episodes) != 0 {
+		t.Errorf("Episodes = %d, want 0 for a feed with no entries", len(show.Episodes))
+	}
+}
+
+func TestParseAtomNoTitle(t *testing.T) {
+	doc := `<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>ep-1</id>
+    <title>Ep One</title>
+    <updated>2026-09-01T00:00:00Z</updated>
+    <link rel="enclosure" href="https://example.com/ep1.mp3" type="audio/mpeg"/>
+  </entry>
+</feed>`
+	show, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if show.Title != "" {
+		t.Errorf("Title = %q, want empty for feed without <title>", show.Title)
+	}
+	if len(show.Episodes) != 1 {
+		t.Errorf("Episodes = %d, want 1", len(show.Episodes))
+	}
+}
+
+func TestParseAtomNoUpdated(t *testing.T) {
+	doc := `<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>No Date Show</title>
+  <entry>
+    <id>ep-1</id>
+    <title>Ep One</title>
+    <link rel="enclosure" href="https://example.com/ep1.mp3" type="audio/mpeg"/>
+  </entry>
+</feed>`
+	show, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(show.Episodes) != 1 {
+		t.Fatalf("Episodes = %d, want 1", len(show.Episodes))
+	}
+	if show.Episodes[0].PubDate != "" {
+		t.Errorf("PubDate = %q, want empty for entry with no <updated>", show.Episodes[0].PubDate)
 	}
 }
 
