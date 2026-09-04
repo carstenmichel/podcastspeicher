@@ -46,8 +46,10 @@ context:
 
 ## Code Map
 
-- `internal/status/status.go` -- `Store` (in-memory, RWMutex-guarded); `ShowStatus` JSON struct; `Record(feedURL, showDir, episodeCount, now)`, `All()`; `diskBytes()` scans non-temp files; `isTempName()` mirrors mirror's logic
-- `internal/status/status_test.go` -- unit tests: empty store, record, overwrite, diskBytes edge cases, isTempName
+- `internal/status/status.go` -- `Store` (in-memory, RWMutex-guarded); `ShowStatus` JSON struct; `Record(feedURL, showDir, episodeCount, now)`, `All()`; `diskBytes()` scans non-temp files via shared `mirror.IsTempName`
+- `internal/status/status_test.go` -- unit tests: empty store, record, overwrite, diskBytes edge cases
+- `internal/mirror/mirror.go` -- `IsTempName` exported (was `isStaleTempName`) so status reuses the temp-file detection instead of duplicating it
+- `internal/mirror/mirror_test.go` -- `TestIsTempName` edge cases (moved from status package)
 - `internal/mirror/mirror.go` -- `PollResult{ShowDir, EpisodeCount}` returned by `PollShow` (was `error` only)
 - `internal/mirror/mirror_test.go` -- updated `pollPath`, `poll` helpers and goroutine calls to consume the new two-value return
 - `internal/web/web.go` -- `Server.Status *status.Store` field; `handleGetStatus` handler; `GET /api/status` registered in `Handler()`; `NewServer` gains `statStore` parameter

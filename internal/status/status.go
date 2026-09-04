@@ -5,10 +5,10 @@ package status
 
 import (
 	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
+
+	"podcastspeicher/internal/mirror"
 )
 
 // ShowStatus is the latest known state for one subscribed show.
@@ -23,8 +23,9 @@ type ShowStatus struct {
 	LastFetched time.Time `json:"last_fetched,omitempty"`
 	// EpisodeCount is the number of rows in podcast.md (registry entries).
 	EpisodeCount int `json:"episode_count"`
-	// DiskBytes is the total size of non-temp episode files in the show
-	// directory. Zero when the directory does not exist.
+	// DiskBytes is the total size of all non-temp files in the show
+	// directory (episode files plus the podcast.md registry). Zero when the
+	// directory does not exist.
 	DiskBytes int64 `json:"disk_bytes"`
 }
 
@@ -55,8 +56,8 @@ func (s *Store) Record(feedURL, showDir string, episodeCount int, now time.Time)
 	}
 }
 
-// All returns a snapshot of all recorded statuses in insertion order (feeds
-// that have been polled at least once in this process lifetime).
+// All returns a snapshot of all recorded statuses (feeds that have been
+// polled at least once in this process lifetime). Order is unspecified.
 func (s *Store) All() []ShowStatus {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -79,7 +80,7 @@ func diskBytes(dir string) int64 {
 	}
 	var total int64
 	for _, en := range entries {
-		if en.IsDir() || isTempName(en.Name()) {
+		if en.IsDir() || mirror.IsTempName(en.Name()) {
 			continue
 		}
 		info, err := en.Info()
@@ -89,28 +90,4 @@ func diskBytes(dir string) int64 {
 		total += info.Size()
 	}
 	return total
-}
-
-// isTempName reports whether a filename looks like a mirror temp file
-// ("<name>.part-<digits>"). Mirrors the logic in mirror.isStaleTempName.
-func isTempName(name string) bool {
-	i := strings.LastIndex(name, ".part-")
-	if i <= 0 {
-		return false
-	}
-	suffix := name[i+len(".part-"):]
-	if suffix == "" {
-		return false
-	}
-	for _, c := range suffix {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// RegistryFile returns the path to podcast.md inside showDir.
-func RegistryFile(showDir string) string {
-	return filepath.Join(showDir, "podcast.md")
 }

@@ -237,7 +237,7 @@ func (m *Mirror) removeStaleTempFiles(dir string) {
 		return
 	}
 	for _, en := range entries {
-		if en.IsDir() || !isStaleTempName(en.Name()) {
+		if en.IsDir() || !IsTempName(en.Name()) {
 			continue
 		}
 		if err := os.Remove(filepath.Join(dir, en.Name())); err != nil {
@@ -246,12 +246,12 @@ func (m *Mirror) removeStaleTempFiles(dir string) {
 	}
 }
 
-// isStaleTempName reports whether name is a temp file created by download
+// IsTempName reports whether name is a temp file created by download
 // ("<archive name>.part-<digits>"). The non-empty prefix requirement keeps
 // hidden user files named exactly ".part-<digits>" out of scope, and archive
 // names always end in a media extension, so this never matches an archived
 // episode.
-func isStaleTempName(name string) bool {
+func IsTempName(name string) bool {
 	i := strings.LastIndex(name, ".part-")
 	if i <= 0 {
 		return false

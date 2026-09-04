@@ -133,11 +133,7 @@ func (s *Server) handleRemoveShow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetStatus(w http.ResponseWriter, _ *http.Request) {
-	statuses := s.Status.All()
-	if statuses == nil {
-		statuses = []status.ShowStatus{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"shows": statuses})
+	writeJSON(w, http.StatusOK, map[string]any{"shows": s.Status.All()})
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, _ *http.Request) {

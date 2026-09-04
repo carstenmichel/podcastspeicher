@@ -90,25 +90,3 @@ func TestDiskBytesMissingDir(t *testing.T) {
 		t.Errorf("diskBytes empty string = %d, want 0", got)
 	}
 }
-
-func TestIsTempName(t *testing.T) {
-	for _, name := range []string{
-		"episode.mp3.part-123",
-		"episode.part-0",
-	} {
-		if !isTempName(name) {
-			t.Errorf("isTempName(%q) = false, want true", name)
-		}
-	}
-	for _, name := range []string{
-		"episode.mp3",
-		".part-123",  // empty prefix — not a temp
-		"episode.part-",
-		"episode.part-abc",
-		"",
-	} {
-		if isTempName(name) {
-			t.Errorf("isTempName(%q) = true, want false", name)
-		}
-	}
-}

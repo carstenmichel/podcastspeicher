@@ -155,7 +155,7 @@ func (e *env) partFiles() []string {
 	entries, _ := os.ReadDir(e.showDir())
 	var out []string
 	for _, en := range entries {
-		if !en.IsDir() && isStaleTempName(en.Name()) {
+		if !en.IsDir() && IsTempName(en.Name()) {
 			out = append(out, en.Name())
 		}
 	}
@@ -858,7 +858,7 @@ func (e *env) waitTempInFlight(t *testing.T) string {
 					continue
 				}
 				for _, se := range sub {
-					if isStaleTempName(se.Name()) {
+					if IsTempName(se.Name()) {
 						return subDir
 					}
 				}
@@ -919,7 +919,7 @@ func TestPreRenameGuardKeepsConcurrentFile(t *testing.T) {
 	}
 	entries, _ := os.ReadDir(showDir)
 	for _, en := range entries {
-		if isStaleTempName(en.Name()) {
+		if IsTempName(en.Name()) {
 			t.Errorf("temp file not removed: %v", en.Name())
 		}
 	}
@@ -957,7 +957,7 @@ func TestContextCancelMidDownload(t *testing.T) {
 	}
 	entries, _ := os.ReadDir(showDir)
 	for _, en := range entries {
-		if isStaleTempName(en.Name()) {
+		if IsTempName(en.Name()) {
 			t.Errorf("temp file not removed after cancel: %v", en.Name())
 		}
 	}
@@ -1017,5 +1017,27 @@ func TestLedgerSelfHealAfterAppendFailure(t *testing.T) {
 	}
 	if mp3s != 1 {
 		t.Errorf("episode files = %d, want 1 (no duplicate download)", mp3s)
+	}
+}
+
+func TestIsTempName(t *testing.T) {
+	for _, name := range []string{
+		"episode.mp3.part-123",
+		"episode.part-0",
+	} {
+		if !IsTempName(name) {
+			t.Errorf("IsTempName(%q) = false, want true", name)
+		}
+	}
+	for _, name := range []string{
+		"episode.mp3",
+		".part-123", // empty prefix — not a temp
+		"episode.part-",
+		"episode.part-abc",
+		"",
+	} {
+		if IsTempName(name) {
+			t.Errorf("IsTempName(%q) = true, want false", name)
+		}
 	}
 }
