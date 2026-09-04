@@ -170,7 +170,7 @@ async function addShow(url) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url: url }),
   });
-  flash("Added " + url + " — mirroring starts on the next poll.", false);
+  flash("Added " + url + " — mirroring started.", false);
   await load();
 }
 

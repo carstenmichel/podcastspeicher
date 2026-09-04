@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,6 +30,7 @@ func newTestServer(t *testing.T) *Server {
 		&settings.Store{Path: filepath.Join(dir, "settings.json"), Log: discardLogger()},
 		status.NewStore(),
 		"6h",
+		nil,
 		discardLogger(),
 	)
 }
@@ -150,6 +152,46 @@ func TestShowsAPI(t *testing.T) {
 	rec = do(t, s, http.MethodDelete, "/api/shows", "")
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("DELETE without url = %d, want 400", rec.Code)
+	}
+}
+
+func TestAddShowTriggersPoll(t *testing.T) {
+	var (
+		mu        sync.Mutex
+		triggered []string
+	)
+	dir := t.TempDir()
+	s := NewServer(
+		&subs.Store{Path: filepath.Join(dir, "shows.txt"), Log: discardLogger()},
+		&settings.Store{Path: filepath.Join(dir, "settings.json"), Log: discardLogger()},
+		status.NewStore(),
+		"6h",
+		func(u string) {
+			mu.Lock()
+			triggered = append(triggered, u)
+			mu.Unlock()
+		},
+		discardLogger(),
+	)
+
+	// A successful add triggers exactly one poll for that feed.
+	rec := do(t, s, http.MethodPost, "/api/shows", `{"url":"https://a.example/feed"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST /api/shows = %d, want 201 (%s)", rec.Code, rec.Body.String())
+	}
+
+	// A duplicate add (409) and an invalid URL (400) must not trigger a poll.
+	if rec := do(t, s, http.MethodPost, "/api/shows", `{"url":"https://a.example/feed"}`); rec.Code != http.StatusConflict {
+		t.Fatalf("duplicate POST /api/shows = %d, want 409", rec.Code)
+	}
+	if rec := do(t, s, http.MethodPost, "/api/shows", `{"url":"not a url"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid POST /api/shows = %d, want 400", rec.Code)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(triggered) != 1 || triggered[0] != "https://a.example/feed" {
+		t.Errorf("TriggerPoll calls = %v, want exactly one call with the added URL", triggered)
 	}
 }
 

@@ -90,6 +90,19 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	m := mirror.New(dataDir, logger)
 	statStore := status.NewStore()
 
+	// pollReq carries feed URLs the config page wants mirrored immediately (a
+	// freshly added show). The single poller loop below is the only place that
+	// calls Mirror.PollShow, so a UI-triggered poll serializes with the
+	// scheduled ones and never runs two downloads of one show at once.
+	pollReq := make(chan string, 16)
+	requestPoll := func(feedURL string) {
+		select {
+		case pollReq <- feedURL:
+		default:
+			logger.Warn("poll request dropped; queue full", "feed", feedURL)
+		}
+	}
+
 	shows, err := subStore.List()
 	if err != nil {
 		return err
@@ -100,7 +113,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 
 	srv := &http.Server{
 		Addr:    envOr("HTTP_ADDR", defaultHTTPAddr),
-		Handler: web.NewServer(subStore, setStore, statStore, envIntervalString(envInterval), logger).Handler(),
+		Handler: web.NewServer(subStore, setStore, statStore, envIntervalString(envInterval), requestPoll, logger).Handler(),
 	}
 	srvDone := make(chan error, 1)
 	go func() {
@@ -135,6 +148,10 @@ func run(ctx context.Context, logger *slog.Logger) error {
 			// is a required capability, so failing loudly beats continuing
 			// without it.
 			return err
+		case feedURL := <-pollReq:
+			// A show was just added on the config page: mirror it now rather
+			// than waiting up to a full interval for the next scheduled poll.
+			pollShow(ctx, m, feedURL, statStore, logger)
 		case <-ticker.C:
 			pollOnce(ctx, m, subStore, statStore, logger)
 			if cur, cerr := effectiveInterval(setStore, envInterval, logger); cerr == nil && cur != interval {
@@ -158,15 +175,22 @@ func pollOnce(ctx context.Context, m *mirror.Mirror, subStore *subs.Store, statS
 		if ctx.Err() != nil {
 			return
 		}
-		start := time.Now()
-		result, err := m.PollShow(ctx, feedURL)
-		if err != nil {
-			logger.Error("show skipped this cycle", "feed", feedURL, "error", err)
-			continue
-		}
-		statStore.Record(feedURL, result.ShowDir, result.EpisodeCount, time.Now())
-		logger.Info("show polled", "feed", feedURL, "took", time.Since(start).Round(time.Millisecond))
+		pollShow(ctx, m, feedURL, statStore, logger)
 	}
+}
+
+// pollShow fetches one show's feed, downloads every episode not yet mirrored,
+// and records its status. A fetch or download error is logged and the show is
+// retried on the next cycle; it never aborts the surrounding poll.
+func pollShow(ctx context.Context, m *mirror.Mirror, feedURL string, statStore *status.Store, logger *slog.Logger) {
+	start := time.Now()
+	result, err := m.PollShow(ctx, feedURL)
+	if err != nil {
+		logger.Error("show skipped this cycle", "feed", feedURL, "error", err)
+		return
+	}
+	statStore.Record(feedURL, result.ShowDir, result.EpisodeCount, time.Now())
+	logger.Info("show polled", "feed", feedURL, "took", time.Since(start).Round(time.Millisecond))
 }
 
 // effectiveInterval resolves the poll interval: a valid override in

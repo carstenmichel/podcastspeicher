@@ -33,7 +33,11 @@ type Server struct {
 	// DefaultInterval is the effective interval string when settings.json
 	// holds no valid override: the POLL_INTERVAL env value or "6h".
 	DefaultInterval string
-	Log             *slog.Logger
+	// TriggerPoll, when non-nil, is called with the feed URL after a show is
+	// successfully registered so the poller can start mirroring it right away
+	// instead of waiting for the next scheduled cycle.
+	TriggerPoll func(feedURL string)
+	Log         *slog.Logger
 }
 
 // Handler returns the HTTP handler for the config page and API.
@@ -52,12 +56,15 @@ func (s *Server) Handler() http.Handler {
 
 // NewServer returns a Server with the given stores. defaultInterval is the
 // interval string to report when settings.json holds no valid override.
-func NewServer(subsStore *subs.Store, setStore *settings.Store, statStore *status.Store, defaultInterval string, log *slog.Logger) *Server {
+// triggerPoll is invoked (when non-nil) after a show is added so mirroring
+// can begin immediately.
+func NewServer(subsStore *subs.Store, setStore *settings.Store, statStore *status.Store, defaultInterval string, triggerPoll func(feedURL string), log *slog.Logger) *Server {
 	return &Server{
 		Subs:            subsStore,
 		Settings:        setStore,
 		Status:          statStore,
 		DefaultInterval: defaultInterval,
+		TriggerPoll:     triggerPoll,
 		Log:             log,
 	}
 }
@@ -111,6 +118,9 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Log.Info("show added via config page", "feed", u)
+	if s.TriggerPoll != nil {
+		s.TriggerPoll(u)
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{"url": u})
 }
 
