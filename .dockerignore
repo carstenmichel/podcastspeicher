@@ -5,5 +5,4 @@ _bmad-output/
 .agents/
 .claude/
 .opencode/
-.bmad-loop/
 .gitignore

@@ -44,14 +44,5 @@ modules:
     repoUrl: https://github.com/bmad-code-org/bmad-method-test-architecture-enterprise
     channel: stable
     sha: f2cb09a5ebc1c16f65a52265bad50e831760c988
-  - name: bmad-loop
-    version: v0.11.1
-    installDate: 2026-08-29T06:46:36.408Z
-    lastUpdated: 2026-09-01T06:08:16.383Z
-    source: external
-    npmPackage: null
-    repoUrl: https://github.com/bmad-code-org/bmad-loop
-    channel: stable
-    sha: bb7cebec4ee4f0fa2783a56ffd0b1b8bc67c4ec5
 ides:
   - bob
