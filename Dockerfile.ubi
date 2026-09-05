@@ -1,0 +1,33 @@
+# No go-toolset:1.27 yet; use 1.26 and let GOTOOLCHAIN=auto fetch the
+# go1.27.x toolchain that go.mod requires (module proxy, build time).
+FROM registry.redhat.io/ubi9/go-toolset:1.26 AS build
+# PATH safety: /etc/profile.d on UBI only applies to login shells;
+# docker RUN is a non-login shell, so make sure the Go toolchain is found.
+ENV PATH=/usr/local/go/bin:${PATH}
+# The toolset image ships GOTOOLCHAIN=local; re-enable auto so the
+# go1.27.x toolchain required by go.mod gets fetched.
+ENV GOTOOLCHAIN=auto
+# Toolset default user is the unprivileged "builder" (uid 1001); use root
+# in this throwaway build stage so /out is writable.
+USER root
+WORKDIR /src
+COPY . ./
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/podcastspeicher . \
+    && mkdir -p /datadir && chown 1001:1001 /datadir
+
+FROM registry.redhat.io/ubi9/ubi-micro:latest
+# /data must be owned by UBI's "nonroot" user (uid/gid 1001, unlike
+# distroless' 65532) so a named volume seeded from it stays writable.
+COPY --from=build --chown=1001:1001 /datadir /data
+# ubi-micro has no /etc/passwd, so the user must be numeric (UBI's
+# "nonroot" uid/gid is 1001).
+USER 1001:1001
+ENV DATA_DIR=/data
+COPY --from=build /out/podcastspeicher /usr/local/bin/podcastspeicher
+VOLUME /data
+EXPOSE 8080
+# ubi-micro has no shell, so the healthcheck is the binary itself doing one
+# GET on the config server's /healthz endpoint (exec form, like the original).
+HEALTHCHECK --interval=1m --timeout=5s --start-period=15s --retries=3 \
+    CMD ["/usr/local/bin/podcastspeicher", "--health"]
+ENTRYPOINT ["/usr/local/bin/podcastspeicher"]
