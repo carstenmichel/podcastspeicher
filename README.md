@@ -50,6 +50,30 @@ Notes:
 - Named volumes work too; on Linux the image ships a nonroot-owned `/data` so the seeded volume is writable. On Docker Desktop (macOS) the volume driver ignores image ownership — pre-seed the volume's `shows.txt` with matching ownership instead.
 - One container per data directory — do not run two instances against the same volume.
 
+### Synology (DiskStation)
+
+Use the committed [`docker-compose.yml`](docker-compose.yml) — it builds the image on the NAS (no registry or cross-compile needed):
+
+```sh
+# 1. Package Center → install "Docker" and "Git" (if not present).
+# 2. Clone the repo into a shared folder:
+git clone <repo> /volume1/docker/podcastspeicher-src
+
+# 3. Create the data dir and hand it to the container user (uid 65532);
+#    shared folders are root-owned, so this step is required:
+sudo mkdir -p /volume1/docker/podcastspeicher
+sudo chown -R 65532:65532 /volume1/docker/podcastspeicher
+
+# 4. Start:
+cd /volume1/docker/podcastspeicher-src
+docker compose up -d        # or: Container Manager → Projects → Create
+
+# 5. Verify:
+curl http://localhost:8080/healthz
+```
+
+The config page is at <http://<nas-ip>:8080>. Host path and port are overridable via `PODCASTSPEICHER_DATA_DIR` and `PODCASTSPEICHER_PORT`. **Keep port 8080 on the LAN only** — the config page is unauthenticated; for remote access use the Synology VPN or a QuickConnect tunnel, not a port forward.
+
 ### Go binary
 
 Requires Go ≥ 1.27.

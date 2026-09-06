@@ -1,0 +1,41 @@
+# podcastspeicher — Docker Compose
+#
+# The image already carries its own HEALTHCHECK (binary-based, no shell
+# needed), so no healthcheck block is repeated here.
+#
+# ── Synology (DiskStation, DSM 7.2, Container Manager) ─────────────────
+#   1. Package Center → install "Docker" and "Git" (if not present).
+#   2. Put this repo in a shared folder, e.g. /volume1/docker/podcastspeicher-src
+#      (git clone via SSH, or copy the folder).
+#   3. Create the data dir and hand it to the container user (uid 65532);
+#      Synology shared folders are root-owned, so the nonroot container
+#      cannot write them without this:
+#        sudo mkdir -p /volume1/docker/podcastspeicher
+#        sudo chown -R 65532:65532 /volume1/docker/podcastspeicher
+#   4. Start (terminal):
+#        cd /volume1/docker/podcastspeicher-src
+#        docker compose up -d
+#      …or Container Manager UI → Projects → Create → point at this folder.
+#   5. Verify:  curl http://<nas-ip>:8080/healthz   → "ok"
+#
+#   Optional overrides (else the defaults in ${VAR:-default} apply):
+#     PODCASTSPEICHER_DATA_DIR=/volume2/ps   # host path for /data
+#     PODCASTSPEICHER_PORT=18080             # host port for the config page
+#
+# ── ⚠ Security ─────────────────────────────────────────────────────────
+#   The config page on :8080 is UNAUTHENTICATED. Keep it on the LAN only.
+#   Do NOT port-forward 8080 or expose it via the DSM reverse proxy without
+#   putting auth in front (Synology VPN / QuickConnect tunnel).
+
+services:
+  podcastspeicher:
+    image: podcastspeicher:latest
+    build: .
+    container_name: podcastspeicher
+    restart: unless-stopped
+    ports:
+      - "${PODCASTSPEICHER_PORT:-8080}:8080"
+    volumes:
+      - ${PODCASTSPEICHER_DATA_DIR:-/volume1/docker/podcastspeicher}:/data
+    environment:
+      POLL_INTERVAL: 6h
