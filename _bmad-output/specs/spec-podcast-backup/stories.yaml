@@ -33,4 +33,4 @@
     The feed parser is extended to handle Atom 1.0 feeds (<feed> root) in
     addition to RSS 2.0, mapping <entry>/<id>/<link rel=enclosure> to the
     existing Show/Episode contract (CAP-8). The RSS path is unchanged.
-  spec_checkpoint: true
+  spec_checkpoint: false
