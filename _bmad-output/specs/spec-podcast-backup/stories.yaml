@@ -27,3 +27,10 @@
     A prominent callout near the top of the README documents the
     feed-truncation cap and the personal-backup scope (CAP-7). It appears
     before any instruction for adding shows.
+- id: "5"
+  title: Atom feed support
+  description: >-
+    The feed parser is extended to handle Atom 1.0 feeds (<feed> root) in
+    addition to RSS 2.0, mapping <entry>/<id>/<link rel=enclosure> to the
+    existing Show/Episode contract (CAP-8). The RSS path is unchanged.
+  spec_checkpoint: true

@@ -37,6 +37,9 @@ Podcast owners prune old episodes from their feeds, so a feed is not a durable a
 - **CAP-7 — README warning and scope note (MUST)**
   - **intent:** The project README can carry a prominent callout near the top stating that feeds are capped at roughly the last 20–50 episodes, so late subscribers cannot catch up on episodes the feed no longer lists, that the app only mirrors what the stream still serves, and that the scope is a personal backup of the operator's own subscriptions.
   - **success:** A new user reading the top of the README encounters the truncation warning and the personal-backup scope note before any instruction for adding shows.
+- **CAP-8 — Atom feed support (SHOULD)**
+  - **intent:** The system can fetch and parse Atom 1.0 podcast feeds (`<feed>` root) in addition to RSS 2.0, mapping `<entry>` to Episode, `<id>` to GUID, `<link rel="enclosure">` to the audio enclosure URL, and `<title>`/`<updated>` to the corresponding episode fields.
+  - **success:** A subscribed Atom feed is mirrored identically to an RSS feed — episodes appear on disk within one poll cycle and are deduped by GUID; the existing RSS parsing path is unaffected.
 
 ## Constraints
 
