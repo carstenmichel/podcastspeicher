@@ -38,10 +38,9 @@ type Show struct {
 	Episodes []Episode
 }
 
-// Fetch downloads the feed at rawURL and parses it as RSS 2.0. A non-2xx
-// status, malformed XML, an oversized body, or a non-RSS document (e.g.
-// Atom) is reported as an error so the caller can skip the show until the
-// next poll.
+// Fetch downloads the feed at rawURL and parses it as RSS 2.0 or Atom 1.0.
+// A non-2xx status, malformed XML, or an oversized body is reported as an error
+// so the caller can skip the show until the next poll.
 func Fetch(ctx context.Context, client *http.Client, rawURL string) (Show, error) {
 	if client == nil {
 		client = &http.Client{Timeout: FeedTimeout}

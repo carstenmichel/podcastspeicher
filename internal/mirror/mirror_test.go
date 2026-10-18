@@ -368,14 +368,42 @@ func TestNeverOverwritesExistingFile(t *testing.T) {
 	}
 }
 
-func TestNonRSSFeedIsSkipped(t *testing.T) {
+func TestAtomFeedEmptyShowsIsParsed(t *testing.T) {
 	e := newEnv(t)
 	e.setFeedBody("/feed.xml", `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Atom</title></feed>`)
-	if err := e.poll(t); err == nil {
-		t.Fatal("poll succeeded on Atom feed, want error")
+	result, err := e.m.PollShow(context.Background(), e.feedURL("/feed.xml"))
+	if err != nil {
+		t.Fatalf("poll on empty Atom feed failed: %v", err)
 	}
-	if _, err := os.Stat(e.showDir()); !os.IsNotExist(err) {
-		t.Errorf("show dir must not be created for a non-RSS feed")
+	if result.EpisodeCount != 0 {
+		t.Errorf("EpisodeCount = %d, want 0 (feed has no entries)", result.EpisodeCount)
+	}
+}
+
+func TestAtomFeedIsMirrorable(t *testing.T) {
+	e := newEnv(t)
+	e.setFeedBody("/feed.xml", `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">`+
+		`<title>Atom Feed</title>`+
+		`<entry><id>atom-guid-1</id><title>Atom Ep 1</title>`+
+		`<updated>Mon, 29 Aug 2026 12:00:00 -0700</updated>`+
+		`<link rel="enclosure" href="`+e.feedURL(`/atom1.mp3`)+`" type="audio/mpeg"/></entry>`+
+		`</feed>`)
+	result, err := e.m.PollShow(context.Background(), e.feedURL("/feed.xml"))
+	if err != nil {
+		t.Fatalf("poll on valid Atom feed failed: %v", err)
+	}
+	if result.EpisodeCount != 1 {
+		t.Fatalf("EpisodeCount = %d, want 1", result.EpisodeCount)
+	}
+	if _, err := os.Stat(filepath.Join(result.ShowDir, "2026-08-29 - Atom Ep 1.mp3")); err != nil {
+		t.Errorf("episode file missing after Atom poll: %v", err)
+	}
+	rows := e.rowsIn(t, result.ShowDir)
+	if len(rows) != 1 {
+		t.Fatalf("registry rows = %d, want 1", len(rows))
+	}
+	if rows[0].GUID != "atom-guid-1" {
+		t.Errorf("GUID = %q, want %q", rows[0].GUID, "atom-guid-1")
 	}
 }
 
